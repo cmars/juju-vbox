@@ -12,7 +12,7 @@ func die(err error) {
 	log.Fatalln(err)
 }
 
-func MachineWithImage(name, imgfile string) (*vbox.Machine, error) {
+func CreateMachineWithImage(name, imgfile string) (*vbox.Machine, error) {
 	m, err := vbox.CreateMachine(name, "")
 	if err != nil {
 		return nil, err
@@ -34,10 +34,18 @@ func MachineWithImage(name, imgfile string) (*vbox.Machine, error) {
 	if err != nil {
 		return nil, err
 	}
+	err = m.SetNIC(1, vbox.NIC{
+		Network:  vbox.NICNetNAT,
+		Hardware: vbox.IntelPro1000MTDesktop,
+	})
+	if err != nil {
+		return nil, err
+	}
 	return m, nil
 }
 
 func main() {
+	//vbox.Verbose = true
 	if len(os.Args) < 3 {
 		die(fmt.Errorf("Usage: <name> <imgfile>"))
 	}
@@ -45,7 +53,7 @@ func main() {
 	imgfile := os.Args[2]
 	m, err := vbox.GetMachine(name)
 	if err == vbox.ErrMachineNotExist {
-		m, err = MachineWithImage(name, imgfile)
+		m, err = CreateMachineWithImage(name, imgfile)
 	}
 	if err != nil {
 		die(err)
