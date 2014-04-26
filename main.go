@@ -58,5 +58,15 @@ func main() {
 	if err != nil {
 		die(err)
 	}
+	err = m.AddNATPF(1, "ssh", vbox.PFRule{
+		Proto:     vbox.PFTCP,
+		HostIP:    nil,
+		HostPort:  2222,
+		GuestIP:   nil,
+		GuestPort: 22,
+	})
+	if err != nil {
+		die(err)
+	}
 	fmt.Println(m)
 }
