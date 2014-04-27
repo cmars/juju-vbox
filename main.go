@@ -13,6 +13,62 @@ func die(err error) {
 	log.Fatalln(err)
 }
 
+const (
+	ifac0Name = "vboxnet0"
+)
+
+func CreateFirstIFac(m *vbox.Machine) (err error) {
+	ifacName := ifac0Name
+	honets, err := vbox.HostonlyNets()
+	if err != nil {
+		return
+	}
+	hon, ok := honets[ifacName]
+	if !ok {
+		hon, err = vbox.CreateHostonlyNet()
+		if err != nil {
+			return
+		}
+		ifacName = hon.Name
+		hon.IPv4 = net.IPNet{
+			IP:   net.IPv4(192, 168, 50, 0),
+			Mask: net.IPv4Mask(255, 255, 255, 0),
+		}
+		err = hon.Config()
+		if err != nil {
+			return
+		}
+	}
+	err = m.SetNIC(2, vbox.NIC{
+		Network:         vbox.NICNetHostonly,
+		Hardware:        vbox.IntelPro1000MTDesktop,
+		HostonlyAdapter: hon.Name,
+	})
+	if err != nil {
+		return
+	}
+	dhcps, err := vbox.DHCPs()
+	if err != nil {
+		return
+	}
+	log.Println("DHCP Servers", dhcps)
+	dhcp, ok := dhcps[ifacName]
+	if !ok {
+		dhcp = &vbox.DHCP{
+			NetworkName: ifacName,
+			IPv4: net.IPNet{
+				IP:   net.IPv4(192, 168, 50, 1),
+				Mask: net.IPv4Mask(255, 255, 255, 0),
+			},
+			LowerIP: net.IPv4(192, 168, 50, 2),
+			UpperIP: net.IPv4(192, 168, 50, 250),
+		}
+	}
+	dhcp.Enabled = true // Make sure it's turned on.
+	vbox.AddHostonlyDHCP(ifacName, *dhcp)
+	return
+}
+
 func CreateMachineWithImage(name, imgfile string) (*vbox.Machine, error) {
 	m, err := vbox.CreateMachine(name, "")
 	if err != nil {
@@ -35,39 +91,14 @@ func CreateMachineWithImage(name, imgfile string) (*vbox.Machine, error) {
 	if err != nil {
 		return nil, err
 	}
-	honets, err := vbox.HostonlyNets()
-	if err != nil {
-		return nil, err
-	}
-	hon, ok := honets["vboxnet0"]
-	if !ok {
-		hon, err = vbox.CreateHostonlyNet()
-		if err != nil {
-			return nil, err
-		}
-		hon.Name = "vboxnet0"
-		hon.IPv4 = net.IPNet{
-			IP:   net.IPv4(192, 168, 50, 1),
-			Mask: net.IPv4Mask(255, 255, 255, 0),
-		}
-		//hon.DHCP = true
-		err = hon.Config()
-		if err != nil {
-			return nil, err
-		}
-	}
 	err = m.SetNIC(1, vbox.NIC{
-		Network:         vbox.NICNetHostonly,
-		Hardware:        vbox.IntelPro1000MTDesktop,
-		HostonlyAdapter: hon.Name,
-	})
-	if err != nil {
-		return nil, err
-	}
-	err = m.SetNIC(2, vbox.NIC{
 		Network:  vbox.NICNetNAT,
 		Hardware: vbox.IntelPro1000MTDesktop,
 	})
+	if err != nil {
+		return nil, err
+	}
+	err = CreateFirstIFac(m)
 	if err != nil {
 		return nil, err
 	}
