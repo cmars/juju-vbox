@@ -44,6 +44,11 @@ func CreateFirstIFac(m *vbox.Machine) error {
 		if err != nil {
 			return err
 		}
+	} else {
+		err = hon.Config()
+		if err != nil {
+			return err
+		}
 		err = m.SetNIC(1, vbox.NIC{
 			Network:         vbox.NICNetHostonly,
 			Hardware:        vbox.IntelPro1000MTDesktop,
@@ -53,6 +58,7 @@ func CreateFirstIFac(m *vbox.Machine) error {
 			return err
 		}
 	}
+
 	dhcps, err := vbox.DHCPs()
 	if err != nil {
 		return err
@@ -113,10 +119,7 @@ func CreateMachineWithImage(name, imgfile string) (*vbox.Machine, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = m.SetNIC(2, vbox.NIC{
-		Network:  vbox.NICNetNAT,
-		Hardware: vbox.IntelPro1000MTDesktop,
-	})
+	err = CreateFirstIFac(m)
 	if err != nil {
 		return nil, err
 	}
