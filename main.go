@@ -6,6 +6,10 @@ import (
 	"log"
 	"net"
 	"os"
+	"path"
+	"time"
+
+	"code.google.com/p/go-uuid/uuid"
 
 	//vbox "github.com/riobard/go-virtualbox"
 	vbox "github.com/gdey/go-virtualbox"
@@ -16,7 +20,8 @@ func die(err error) {
 }
 
 const (
-	ifac0Name = "vboxnet0"
+	ifac0Name       = "vboxnet0"
+	storageCtrlName = "storctrl0"
 )
 
 var (
@@ -92,12 +97,12 @@ func CreateFirstIFac(m *vbox.Machine, nicNumber int) (err error) {
 	return
 }
 
-func CreateMachineWithImage(name, imgfile string) (*vbox.Machine, error) {
+func CreateMachineWithImage(name, imgFile string) (*vbox.Machine, error) {
 	m, err := vbox.CreateMachine(name, "")
 	if err != nil {
 		return nil, err
 	}
-	err = m.AddStorageCtl("storecntl", vbox.StorageController{
+	err = m.AddStorageCtl(storageCtrlName, vbox.StorageController{
 		SysBus:      vbox.SysBusSATA,
 		Ports:       1,
 		Chipset:     vbox.CtrlIntelAHCI,
@@ -107,14 +112,13 @@ func CreateMachineWithImage(name, imgfile string) (*vbox.Machine, error) {
 	if err != nil {
 		return nil, err
 	}
-	//TODO: We should clone the imagefile first, and the
-	//      Attach it — this will make the system take a bit
-	//      longer, but this is the only way to boot multiple
-	//      machines.
-	vbox.CloneDiskImage(name+".vmdk", imgfile)
-	err = m.AttachStorage("storecntl", vbox.StorageMedium{
+	//@cmars : I'm being lazy here; It should probally go in a different directory or something. --gdey
+	newImgFile := path.Join(path.Dir(imgFile),
+		fmt.Sprintf(".%s.%s.%s", name, path.Base(imgFile), uuid.New()))
+	vbox.CloneDiskImage(newImgFile, imgFile)
+	err = m.AttachStorage(storageCtrlName, vbox.StorageMedium{
 		DriveType: vbox.DriveHDD,
-		Medium:    name + ".vmdk",
+		Medium:    newImgFile,
 	})
 	if err != nil {
 		return nil, err
@@ -126,6 +130,16 @@ func CreateMachineWithImage(name, imgfile string) (*vbox.Machine, error) {
 		})
 		if err != nil {
 			return nil, err
+		}
+		err = m.AddNATPF(1, "ssh", vbox.PFRule{
+			Proto:     vbox.PFTCP,
+			HostIP:    nil,
+			HostPort:  2222,
+			GuestIP:   nil,
+			GuestPort: 22,
+		})
+		if err != nil {
+			die(err)
 		}
 	*/
 	err = CreateFirstIFac(m, 1)
@@ -149,17 +163,17 @@ func main() {
 	if err != nil {
 		die(err)
 	}
-	/*
-		err = m.AddNATPF(1, "ssh", vbox.PFRule{
-			Proto:     vbox.PFTCP,
-			HostIP:    nil,
-			HostPort:  2222,
-			GuestIP:   nil,
-			GuestPort: 22,
-		})
+	err = m.Start()
+	if err != nil {
+		die(err)
+	}
+	for {
+		err = m.Refresh()
 		if err != nil {
-			die(err)
+			fmt.Println("refresh:", err)
+		} else {
+			fmt.Println(m)
 		}
-	*/
-	fmt.Println(m)
+		time.Sleep(5 * time.Second)
+	}
 }
