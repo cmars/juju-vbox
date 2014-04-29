@@ -1,12 +1,14 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"net"
 	"os"
 
-	vbox "github.com/riobard/go-virtualbox"
+	//vbox "github.com/riobard/go-virtualbox"
+	vbox "github.com/gdey/go-virtualbox"
 )
 
 func die(err error) {
@@ -17,55 +19,76 @@ const (
 	ifac0Name = "vboxnet0"
 )
 
-func CreateFirstIFac(m *vbox.Machine) (err error) {
-	ifacName := ifac0Name
-	honets, err := vbox.HostonlyNets()
+var (
+	ErrDHCPNotExist        = errors.New("DHCP setting does not exist.")
+	ErrHostonlyNetNotExist = errors.New("Hostonly network does not exist.")
+)
+
+func getDHCPForIPNet(ipNet net.IPNet) (*vbox.DHCP, error) {
+	dhcps, err := vbox.DHCPs()
 	if err != nil {
-		return
+		return nil, err
 	}
-	hon, ok := honets[ifacName]
-	if !ok {
-		hon, err = vbox.CreateHostonlyNet()
+	log.Println("DHCP Servers", dhcps)
+	for _, dhcp := range dhcps {
+		if ipNet.String() == dhcp.IPv4.String() {
+			return dhcp, nil
+		}
+	}
+	return nil, ErrDHCPNotExist
+}
+func getHostonlyForIPNet(ipNet net.IPNet) (*vbox.HostonlyNet, error) {
+	nets, err := vbox.HostonlyNets()
+	if err != nil {
+		return nil, err
+	}
+	for _, honet := range nets {
+		if ipNet.String() == honet.IPv4.String() {
+			return honet, nil
+		}
+	}
+	return nil, ErrHostonlyNetNotExist
+}
+
+func findCreateHostonlyForIPNet(ipNet net.IPNet) (*vbox.HostonlyNet, error) {
+	hon, err := getHostonlyForIPNet(ipNet)
+	if err == ErrHostonlyNetNotExist {
+		hon, err := vbox.CreateHostonlyNet()
 		if err != nil {
-			return
+			return nil, err
 		}
-		ifacName = hon.Name
-		hon.IPv4 = net.IPNet{
-			IP:   net.IPv4(192, 168, 50, 0),
-			Mask: net.IPv4Mask(255, 255, 255, 0),
-		}
+		hon.IPv4 = ipNet
 		err = hon.Config()
 		if err != nil {
-			return
+			return nil, err
 		}
+		dhcp, err := getDHCPForIPNet(ipNet)
+		if err == ErrDHCPNotExist {
+			dhcp = &vbox.DHCP{
+				NetworkName: hon.Name,
+				IPv4:        ipNet,
+				LowerIP:     net.IPv4(172, 16, 16, 2),
+				UpperIP:     net.IPv4(172, 16, 16, 240),
+			}
+		}
+		dhcp.Enabled = true // Make sure it's turned on.
+		vbox.AddHostonlyDHCP(hon.Name, *dhcp)
+		return hon, nil
 	}
-	err = m.SetNIC(2, vbox.NIC{
+	return hon, nil
+}
+
+func CreateFirstIFac(m *vbox.Machine, nicNumber int) (err error) {
+	hon, err := findCreateHostonlyForIPNet(net.IPNet{
+		IP:   net.IPv4(172, 16, 16, 1),
+		Mask: net.IPv4Mask(255, 255, 255, 0),
+	})
+
+	err = m.SetNIC(nicNumber, vbox.NIC{
 		Network:         vbox.NICNetHostonly,
 		Hardware:        vbox.IntelPro1000MTDesktop,
 		HostonlyAdapter: hon.Name,
 	})
-	if err != nil {
-		return
-	}
-	dhcps, err := vbox.DHCPs()
-	if err != nil {
-		return
-	}
-	log.Println("DHCP Servers", dhcps)
-	dhcp, ok := dhcps[ifacName]
-	if !ok {
-		dhcp = &vbox.DHCP{
-			NetworkName: ifacName,
-			IPv4: net.IPNet{
-				IP:   net.IPv4(192, 168, 50, 1),
-				Mask: net.IPv4Mask(255, 255, 255, 0),
-			},
-			LowerIP: net.IPv4(192, 168, 50, 2),
-			UpperIP: net.IPv4(192, 168, 50, 250),
-		}
-	}
-	dhcp.Enabled = true // Make sure it's turned on.
-	vbox.AddHostonlyDHCP(ifacName, *dhcp)
 	return
 }
 
@@ -84,21 +107,28 @@ func CreateMachineWithImage(name, imgfile string) (*vbox.Machine, error) {
 	if err != nil {
 		return nil, err
 	}
+	//TODO: We should clone the imagefile first, and the
+	//      Attach it — this will make the system take a bit
+	//      longer, but this is the only way to boot multiple
+	//      machines.
+	vbox.CloneDiskImage(name+".vmdk", imgfile)
 	err = m.AttachStorage("storecntl", vbox.StorageMedium{
 		DriveType: vbox.DriveHDD,
-		Medium:    imgfile,
+		Medium:    name + ".vmdk",
 	})
 	if err != nil {
 		return nil, err
 	}
-	err = m.SetNIC(1, vbox.NIC{
-		Network:  vbox.NICNetNAT,
-		Hardware: vbox.IntelPro1000MTDesktop,
-	})
-	if err != nil {
-		return nil, err
-	}
-	err = CreateFirstIFac(m)
+	/*
+		err = m.SetNIC(1, vbox.NIC{
+			Network:  vbox.NICNetNAT,
+			Hardware: vbox.IntelPro1000MTDesktop,
+		})
+		if err != nil {
+			return nil, err
+		}
+	*/
+	err = CreateFirstIFac(m, 1)
 	if err != nil {
 		return nil, err
 	}
