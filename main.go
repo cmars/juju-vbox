@@ -97,7 +97,22 @@ func CreateFirstIFac(m *vbox.Machine, nicNumber int) (err error) {
 	return
 }
 
+type hddCloneRt struct {
+	filename string
+	err      error
+}
+
 func CreateMachineWithImage(name, imgFile string) (*vbox.Machine, error) {
+
+	cloneErrChan := make(chan hddCloneRt)
+	go func() {
+		//@cmars : I'm being lazy here; It should probally go in a different directory or something. --gdey
+		newImgFile := path.Join(path.Dir(imgFile),
+			fmt.Sprintf(".%s.%s.%s", name, path.Base(imgFile), uuid.New()))
+		err := vbox.CloneDiskImage(newImgFile, imgFile)
+		cloneErrChan <- hddCloneRt{newImgFile, err}
+	}()
+
 	m, err := vbox.CreateMachine(name, "")
 	if err != nil {
 		return nil, err
@@ -108,17 +123,6 @@ func CreateMachineWithImage(name, imgFile string) (*vbox.Machine, error) {
 		Chipset:     vbox.CtrlIntelAHCI,
 		HostIOCache: true,
 		Bootable:    true,
-	})
-	if err != nil {
-		return nil, err
-	}
-	//@cmars : I'm being lazy here; It should probally go in a different directory or something. --gdey
-	newImgFile := path.Join(path.Dir(imgFile),
-		fmt.Sprintf(".%s.%s.%s", name, path.Base(imgFile), uuid.New()))
-	vbox.CloneDiskImage(newImgFile, imgFile)
-	err = m.AttachStorage(storageCtrlName, vbox.StorageMedium{
-		DriveType: vbox.DriveHDD,
-		Medium:    newImgFile,
 	})
 	if err != nil {
 		return nil, err
@@ -143,6 +147,18 @@ func CreateMachineWithImage(name, imgFile string) (*vbox.Machine, error) {
 		}
 	*/
 	err = CreateFirstIFac(m, 1)
+	if err != nil {
+		return nil, err
+	}
+
+	rt := <-cloneErrChan
+	if rt.err != nil {
+		return nil, err
+	}
+	err = m.AttachStorage(storageCtrlName, vbox.StorageMedium{
+		DriveType: vbox.DriveHDD,
+		Medium:    rt.filename,
+	})
 	if err != nil {
 		return nil, err
 	}
